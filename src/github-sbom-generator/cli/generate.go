@@ -62,24 +62,24 @@ func generateCmd() *cobra.Command {
 		Example: `github-sbom-generator generate https://github.com/foo/bar#v1.2.3 https://github.com/foo/bar#abcd1122 ./path/to/repo`,
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var allUrls []*url.URL
+			var allRepos []*repoWithReader
 			for _, repo := range args {
 				log.Debugf("Processing %s", repo)
-				u, err := parse(repo)
+				r, err := parse(repo)
 				if err != nil {
 					log.Fatalf("Error generating %s: %v", repo, err)
 				}
-				allUrls = append(allUrls, u)
+				allRepos = append(allRepos, r)
 			}
 			switch outputFormat {
 			case "spdx":
-				sbom, err := buildSbom(allUrls, namespace, creator)
+				sbom, err := buildSbom(allRepos, namespace, creator)
 				if err != nil {
 					return err
 				}
 				return spdxtv.Write(sbom, os.Stdout)
 			case "spdx-json":
-				sbom, err := buildSbom(allUrls, namespace, creator)
+				sbom, err := buildSbom(allRepos, namespace, creator)
 				if err != nil {
 					return err
 				}
@@ -96,8 +96,25 @@ func generateCmd() *cobra.Command {
 	return cmd
 }
 
-func parse(repoWithRef string) (u *url.URL, err error) {
-	var repo = repoWithRef
+type repoWithReader struct {
+	url *url.URL
+	fs.FS
+	close func() error
+}
+
+func (r *repoWithReader) Close() error {
+	if r.close != nil {
+		return r.close()
+	}
+	return nil
+}
+
+func parse(repoWithRef string) (r *repoWithReader, err error) {
+	var (
+		repo      = repoWithRef
+		readerDir string
+		closer    func() error
+	)
 	// first check to see if it is a file path
 	if strings.HasPrefix(repoWithRef, "/") || strings.HasPrefix(repoWithRef, ".") {
 		// it is a file path, so we need to get the remote origin
@@ -127,7 +144,37 @@ func parse(repoWithRef string) (u *url.URL, err error) {
 			return nil, fmt.Errorf("unable to get HEAD for repo at %s: %v", repoWithRef, err)
 		}
 		repo = fmt.Sprintf("%s#%s", repo, commit.Hash())
+		readerDir = repoWithRef
+	} else {
+		// tmpdir to save our files
+		tmpDir, err := os.MkdirTemp("", "sbom")
+		if err != nil {
+			return nil, err
+		}
+
+		// git protocol means clone the whole thing
+		// it is a tgz file, so we should be able to scan it
+		var gz *gzip.Reader
+		err = extractURLToPath(repoWithRef, tmpDir, func(r io.Reader) (io.Reader, error) {
+			gz, err = gzip.NewReader(r)
+			return gz, err
+		})
+		if err != nil {
+			return nil, err
+		}
+		// directory contains everything, so go look for files
+		readerDir = tmpDir
+		closer = func() error {
+			if err := gz.Close(); err != nil {
+				return err
+			}
+			if err := os.RemoveAll(tmpDir); err != nil {
+				return err
+			}
+			return nil
+		}
 	}
+
 	// get repo and ref
 	parsed, err := url.Parse(repo)
 	if err != nil {
@@ -136,19 +183,24 @@ func parse(repoWithRef string) (u *url.URL, err error) {
 	if parsed.Scheme == "" || parsed.Host == "" || parsed.Path == "" {
 		return nil, fmt.Errorf("url %s is not valid", repoWithRef)
 	}
+	r = &repoWithReader{
+		FS:    os.DirFS(readerDir),
+		url:   parsed,
+		close: closer,
+	}
 
-	return parsed, nil
+	return r, nil
 }
 
-func buildSbom(urls []*url.URL, namespace, creator string) (*spdx.Document, error) {
+func buildSbom(repos []*repoWithReader, namespace, creator string) (*spdx.Document, error) {
 	var packages []*spdx.Package
-	for _, u := range urls {
+	for _, r := range repos {
 		// what do we want to add?
 		// - PackageLicenseConcluded
 		// - PackageLicenseDeclared
 		// - PackageCopyrightText
+		u := r.url
 		downloadURL := githubUrlToDownload(u)
-
 		// we have some logic about versions
 		name := filepath.Base(u.Path)
 		pkg := &spdx.Package{
@@ -165,7 +217,7 @@ func buildSbom(urls []*url.URL, namespace, creator string) (*spdx.Document, erro
 		if version != "" {
 			pkg.PackageVersion = version
 		}
-		licenseDeclared, licenseConcluded := getLicenseFromURL(downloadURL)
+		licenseDeclared, licenseConcluded := getLicenseFromReader(r)
 		if licenseDeclared != "" {
 			pkg.PackageLicenseDeclared = licenseDeclared
 		}
@@ -197,33 +249,16 @@ func buildSbom(urls []*url.URL, namespace, creator string) (*spdx.Document, erro
 	}, nil
 }
 
-// getLicenseFromURL try to determine license from URL
-func getLicenseFromURL(u string) (string, string) {
-	if u == "" {
+// getLicenseFromReader try to determine license from the reader
+func getLicenseFromReader(fsys *repoWithReader) (string, string) {
+	if fsys == nil {
 		return "", ""
 	}
-	// tmpdir to save our files
-	tmpDir, err := os.MkdirTemp("", "sbom")
-	if err != nil {
-		return "", ""
-	}
-	defer os.RemoveAll(tmpDir)
+	defer fsys.Close()
 
-	// git protocol means clone the whole thing
-	// it is a tgz file, so we should be able to scan it
-	var gz *gzip.Reader
-	err = extractURLToPath(u, tmpDir, func(r io.Reader) (io.Reader, error) {
-		gz, err = gzip.NewReader(r)
-		return gz, err
-	})
-	if err != nil {
-		return "", ""
-	}
-	defer gz.Close()
 	// directory contains everything, so go look for files
 	var licenses []string
-	fsys := os.DirFS(tmpDir)
-	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -302,7 +337,6 @@ func getLicenseFromURL(u string) (string, string) {
 		licenseConcluded = unknownLicenseType
 	}
 	return licensesDeclared, licenseConcluded
-
 }
 
 type decompress func(io.Reader) (io.Reader, error)
