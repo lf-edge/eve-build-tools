@@ -1,7 +1,7 @@
 # Use an official Golang runtime as a parent image
-FROM golang:1.20.10-alpine3.18 as builder
+FROM golang:1.21.6-alpine3.19 as builder
 
-RUN apk --no-cache add make=4.4.1-r1
+RUN apk --no-cache add make
 
 # Copy the current directory contents into the container at /go/src/app
 COPY . /go/src/app
