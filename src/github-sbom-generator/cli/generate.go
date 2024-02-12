@@ -368,13 +368,19 @@ func extractURLToPath(u string, path string, decompress decompress) error {
 			return err
 		}
 
+		if strings.Contains(header.Name, "..") {
+			return fmt.Errorf("cannot expand beyond root for %s", header.Name)
+		}
+
+		target := filepath.Join(path, header.Name)
+
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.Mkdir(filepath.Join(path, header.Name), 0755); err != nil {
+			if err := os.Mkdir(target, 0755); err != nil {
 				log.Fatalf("extract: Mkdir() failed: %s", err.Error())
 			}
 		case tar.TypeReg:
-			outFile, err := os.Create(filepath.Join(path, header.Name))
+			outFile, err := os.Create(target)
 			if err != nil {
 				log.Fatalf("extract: Create() failed: %s", err.Error())
 			}
