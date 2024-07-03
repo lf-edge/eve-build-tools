@@ -13,8 +13,8 @@ WORKDIR /go/src/app
 RUN make tools OUTDIR=/usr/local/bin
 
 # Deploy the application binaries into a lean image
-FROM alpine:3.18
-RUN apk --no-cache add ca-certificates=20230506-r0 \
+FROM alpine:3.20
+RUN apk --no-cache add ca-certificates=20240226-r0 \
   && update-ca-certificates
 
 COPY --from=builder /usr/local/bin/* /usr/local/bin/
