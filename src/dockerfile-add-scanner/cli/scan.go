@@ -119,7 +119,7 @@ func scan(dockerfile, arch string) ([]*url.URL, error) {
 	// this method strips out all comments. We might want some of the comments, which
 	// github.com/moby/buildkit/frontend/dockerfile/parser.Parse() gives us, but then it does not
 	// resolve the various variables.
-	state, _, _, err := dockerfile2llb.Dockerfile2LLB(ctx, data, dockerfile2llb.ConvertOpt{
+	state, _, _, _, err := dockerfile2llb.Dockerfile2LLB(ctx, data, dockerfile2llb.ConvertOpt{
 		TargetPlatform: &ocispecs.Platform{Architecture: arch, OS: "linux"},
 	})
 	if err != nil {
