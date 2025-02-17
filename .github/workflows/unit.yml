@@ -25,7 +25,7 @@ jobs:
           test-results: dist/amd64/results.json
       - name: Store raw test results
         if: ${{ always() }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: 'test-report'
           path: ${{ github.workspace }}/dist
