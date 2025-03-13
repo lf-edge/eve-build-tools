@@ -1,6 +1,6 @@
 module github.com/lf-edge/eve/tools/github-sbom-generator
 
-go 1.20
+go 1.21
 
 require (
 	github.com/go-git/go-git/v5 v5.13.0
