@@ -25,18 +25,23 @@ jobs:
       - name: Generate patch locally
         working-directory: src
         run: |
-          git remote add upstream ${{ github.server_url }}/${{ github.repository }}.git
-          git fetch upstream ${{ github.base_ref }}
-          git diff upstream/${{ github.base_ref }}...HEAD > ${{ github.workspace }}/pr.patch
-          git checkout upstream/${{ github.base_ref }}
+          UPSTREAM="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git remote add upstream "${UPSTREAM}"
+          git fetch upstream "${GITHUB_BASE_REF}"
+          PATCH="${GITHUB_WORKSPACE}/pr.patch"
+          git diff "upstream/${GITHUB_BASE_REF}...HEAD" > "${PATCH}"
+          git checkout "upstream/${GITHUB_BASE_REF}"
 
       - name: Yetus
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YETUS_PLUGINS: >-
+            all,-asflicense,-author,-findbugs,-gitlab,-jira,-shelldocs
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
             -e GITHUB_TOKEN \
+            -e YETUS_PLUGINS \
             lfedge/eve-yetus:0.15.1-eve-2 \
             test-patch \
             --basedir=/workspace/src \
@@ -44,7 +49,7 @@ jobs:
             --build-tool=nobuild \
             --continuous-improvement=true \
             --github-token="${GITHUB_TOKEN}" \
-            --plugins='all,-asflicense,-author,-findbugs,-gitlab,-jira,-shelldocs' \
+            --plugins="${YETUS_PLUGINS}" \
             --revive-config=.revive.toml \
             --brief-report-file=/workspace/out/brief.txt \
             --console-report-file=/workspace/out/console.txt \
