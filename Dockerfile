@@ -1,5 +1,5 @@
 # Use an official Golang runtime as a parent image
-FROM golang:1.25-alpine3.22 AS builder
+FROM golang:1.26-alpine3.22 AS builder
 
 RUN apk --no-cache add make
 
